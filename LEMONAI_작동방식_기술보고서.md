@@ -297,6 +297,11 @@ flowchart TD
     O --> S{남은 task 여부}
     S -->|있음| E
     S -->|없음| T[summary 생성 버전 기록 상태 업데이트]
+
+    U[(Knowledge DB 장기 계층)] --> F
+    U --> C
+    V[LocalMemory 단기 계층] --> F
+    P --> V
 ```
 
 ### 4.9 프롬프트별 목적 입력 출력 요약
@@ -324,6 +329,146 @@ flowchart TD
 - 주요 목적: 전체 task 수행 결과와 산출 파일을 종합 정리한 최종 응답 생성.
 - 주요 입력: goal, task 상태 목록, 생성 파일 메타데이터, static URL 문맥.
 - 주요 출력: 사용자 전달용 최종 요약 텍스트.
+
+### 4.10 코드 기반 검증 관점 보완 통합
+
+외부 참고 문서와 현재 코드베이스를 교차 확인한 결과, 현재 보고서에 이미 반영된 항목과 추가 보완 항목을 아래와 같이 정리.
+
+#### 4.10.1 이미 반영된 항목
+
+- Planning 단계 지식 카테고리 주입 방식 반영 상태.
+- Execution 단계 지식 카테고리 주입 방식 반영 상태.
+- thinking 및 planning 프롬프트 기반 실행 구조 반영 상태.
+- retry 루프와 task 상태 갱신 중심의 실행 제어 반영 상태.
+
+#### 4.10.2 추가 보완된 항목 요약
+
+- 경험 저장의 실제 저장소 위치와 데이터 형태 보강.
+- Reflection 동작에서 Prompt 설정 파일, 호출 함수, 모델 호출 경로 보강.
+- Output 생성 시 경험이 어떤 경로로 재적용되는지 보강.
+- evolve가 수행되는 레벨의 코드 관점 정의 보강.
+
+#### 4.10.3 경험 저장 형태와 저장소 위치
+
+- 장기 경험 Knowledge 저장소는 SQLite DB의 Knowledge 테이블 기반 영속 저장 구조.
+- 저장 단위는 rule 텍스트 중심이며 category 기반 필터링 후 Prompt Injection에 재사용되는 구조.
+- 단기 실행 기억은 LocalMemory 기반 저장 구조로 task 단위 user/assistant 메시지 및 오류 피드백 누적 방식.
+- 따라서 경험 저장은 DB 기반 장기 기억과 파일/메모리 기반 단기 기억의 이중 계층 구조.
+
+#### 4.10.4 Reflection 실제 동작 방식 코드 경로
+
+Reflection은 두 레이어로 구분되는 구조.
+
+1) Knowledge Evolution Reflection 레이어
+- 코드 경로: `src/knowledge/feedback.js`.
+- Prompt 템플릿: `src/template/knowledge.txt`.
+- 입력: `user_request`, `user_feedback`, 현재 Knowledge 목록.
+- 모델 호출: `chat_completion()` 경유 후 LLM 응답 JSON 수신.
+- 반영 처리: `handleKnowledgeReflection()`으로 ADD/MODIFY/DELETE/NO_ACTION 연산 적용.
+- 부가 상태: `Agent.experience_iteration_count` 증가 반영.
+
+2) Task Execution Reflection 레이어
+- 코드 경로: `src/agent/reflection/index.js`.
+- 기본 동작: tool 실행 결과의 status 기반 즉시 성공/실패 판정 우선.
+- 조건부 동작: 중간 판정 필요 시 `llmEvaluate` 경유 평가 수행 가능 구조.
+
+#### 4.10.5 모델 호출 방식 정리
+
+- Planning 호출 경로: `src/agent/planning/index.js`에서 `getDefaultModel` 기반 server/local 분기 후 LLM 호출.
+- Thinking 호출 경로: `src/agent/code-act/thinking.js`에서 동일하게 `getDefaultModel` 기반 server/local 분기 후 LLM 호출.
+- Knowledge Reflection 호출 경로: `src/knowledge/feedback.js`에서 `chat_completion` 기반 호출 수행.
+- 로그 저장: LLM 호출 기록은 `LLMLogs` 모델로 적재되는 구조.
+
+#### 4.10.6 Output 생성 시 경험 적용 방식
+
+- 직접 적용 경로는 Prompt Injection 구조.
+- Planning 시 `resolvePlanningKnowledge`가 category 필터링된 Knowledge를 문자열 결합 후 planning Prompt에 삽입.
+- Execution 시 `resolveThinkingKnowledge`가 category 필터링된 Knowledge를 thinking Prompt에 삽입.
+- 실패 피드백은 LocalMemory user 메시지로 재주입되어 다음 action 생성에 즉시 반영.
+- 최종 summary는 task 결과와 생성 파일 메타데이터를 종합하되, 간접적으로는 앞선 knowledge 주입과 memory 누적의 영향이 반영된 결과.
+
+#### 4.10.7 Evolve 수행 레벨 정의
+
+- evolve는 단순 Output 문구 교정 레벨이 아닌 전략/규칙/사용자 프로필 레벨 수행 구조.
+- 장기 evolve: Knowledge DB 갱신을 통한 planning/execution 정책 변화.
+- 단기 evolve: LocalMemory 오류 피드백 누적을 통한 현재 task 실행 품질 보정.
+- 결론적으로 LemonAI의 evolve는 Prompt-Policy 레벨과 Execution-Control 레벨의 결합 진화 구조.
+
+### 4.11 경험 저장 이중 계층 구조 통합
+
+장기 경험과 단기 경험의 저장소, 작동 기준, 적용 경로를 명확히 구분하기 위한 상세 설명.
+
+#### 4.11.1 이중 계층 개념 정의
+
+- 장기 계층: Knowledge 테이블 기반 영속 경험 저장 계층.
+- 단기 계층: LocalMemory 기반 task 실행 중 문맥/오류 피드백 저장 계층.
+- 결합 방식: 장기 계층은 다음 실행 전반의 정책/규칙에 영향, 단기 계층은 현재 task 반복 루프의 즉시 보정에 영향.
+
+#### 4.11.2 이중 계층 저장소 및 작동 기준
+
+##### 4.11.2.1 장기 경험 계층
+
+- 저장소: SQLite DB `Knowledge` 테이블.
+- 입력 소스: 사용자 요청(`user_request`) + 사용자 피드백(`user_feedback`) + 기존 knowledge 집합.
+- 갱신 트리거: `handle_feedback()` 호출 시점.
+- 갱신 방식: LLM이 반환한 operations(ADD/MODIFY/DELETE/NO_ACTION)를 `handleKnowledgeReflection()`으로 반영.
+- 적용 기준: Planning/Thinking 프롬프트 단계에서 category 필터 기반 주입.
+
+##### 4.11.2.2 단기 경험 계층
+
+- 저장소: LocalMemory(task 단위 메시지 저장소).
+- 입력 소스: thinking 프롬프트, assistant action 결과, reflection 실패 코멘트.
+- 갱신 트리거: Code-Act 루프 각 반복 시점.
+- 갱신 방식: `memory.addMessage(user|assistant, content)` 누적 저장.
+- 적용 기준: 동일 task의 다음 action 생성 직전에 최근 메모리 문맥 재주입.
+
+#### 4.11.3 경험 저장 이중 계층 구조 다이어그램
+
+```mermaid
+flowchart LR
+    U[사용자 요청 및 피드백] --> KR[Knowledge Reflection\nsrc/knowledge/feedback.js]
+    KR --> KP[knowledge.txt Prompt 구성]
+    KP --> KL[LLM 판단\nADD MODIFY DELETE NO_ACTION]
+    KL --> KDB[(SQLite Knowledge Table)]
+
+    KDB --> PK[Planning Knowledge Injection\nuser_profile core_directive planning]
+    KDB --> TK[Thinking Knowledge Injection\nuser_profile core_directive execution]
+
+    T[현재 Task 실행] --> TH[Thinking Prompt 생성]
+    TH --> LA[LLM Action 생성 XML]
+    LA --> EX[Runtime Action 실행]
+    EX --> RF[Reflection 판정]
+    RF -->|failure| LM[LocalMemory 누적\n오류 코멘트 user 재주입]
+    RF -->|success| LS[Task 진행]
+    LM --> TH
+
+    PK --> TH
+    TK --> TH
+```
+
+#### 4.11.4 작동 기준 흐름도 장기 대 단기
+
+```mermaid
+flowchart TD
+    A[새로운 사용자 상호작용 발생] --> B{경험 반영 대상 판단}
+    B -->|사용자 선호 전략 규칙 변화| C[장기 계층 반영]
+    B -->|현재 task 실행 실패 보정| D[단기 계층 반영]
+
+    C --> E[Knowledge Reflection Prompt 실행]
+    E --> F[Knowledge DB 업데이트]
+    F --> G[다음 Planning Thinking에서 정책 주입]
+
+    D --> H[LocalMemory에 실패 코멘트 저장]
+    H --> I[같은 task 재시도 시 메모리 재주입]
+    I --> J[즉시 실행 품질 보정]
+```
+
+#### 4.11.5 요약
+
+- 장기 계층은 에이전트 정책과 사용자 프로필 축적을 담당하는 진화 레이어.
+- 단기 계층은 현재 작업의 오류 교정과 반복 실행 안정화를 담당하는 실행 레이어.
+- Self-Evolving은 두 계층이 결합되어 장기 전략 개선과 단기 실행 보정을 동시에 달성하는 구조.
+
 
 ## 5. 운영 관점 종합 정리
 
@@ -458,141 +603,3 @@ retry loop]
 - createFilesVersion: 생성 파일 메타데이터를 파일 버전 이력으로 기록하는 버전 관리 유틸리티.
 - best practice knowledge: planning/thinking 단계에서 최우선 지침으로 주입되는 운영 지식 집합.
 
-## 8. 코드 기반 검증 관점 보완 사항
-
-외부 참고 문서와 현재 코드베이스를 교차 확인한 결과, 현재 보고서에 이미 반영된 항목과 추가 보완 항목을 아래와 같이 정리.
-
-### 8.1 이미 반영된 항목
-
-- Planning 단계 지식 카테고리 주입 방식 반영 상태.
-- Execution 단계 지식 카테고리 주입 방식 반영 상태.
-- thinking 및 planning 프롬프트 기반 실행 구조 반영 상태.
-- retry 루프와 task 상태 갱신 중심의 실행 제어 반영 상태.
-
-### 8.2 추가 보완된 항목 요약
-
-- 경험 저장의 실제 저장소 위치와 데이터 형태 보강.
-- Reflection 동작에서 Prompt 설정 파일, 호출 함수, 모델 호출 경로 보강.
-- Output 생성 시 경험이 어떤 경로로 재적용되는지 보강.
-- evolve가 수행되는 레벨의 코드 관점 정의 보강.
-
-### 8.3 경험 저장 형태와 저장소 위치
-
-- 장기 경험 Knowledge 저장소는 SQLite DB의 Knowledge 테이블 기반 영속 저장 구조.
-- 저장 단위는 rule 텍스트 중심이며 category 기반 필터링 후 Prompt Injection에 재사용되는 구조.
-- 단기 실행 기억은 LocalMemory 기반 저장 구조로 task 단위 user/assistant 메시지 및 오류 피드백 누적 방식.
-- 따라서 경험 저장은 DB 기반 장기 기억과 파일/메모리 기반 단기 기억의 이중 계층 구조.
-
-### 8.4 Reflection 실제 동작 방식 코드 경로
-
-Reflection은 두 레이어로 구분되는 구조.
-
-1) Knowledge Evolution Reflection 레이어
-- 코드 경로: `src/knowledge/feedback.js`.
-- Prompt 템플릿: `src/template/knowledge.txt`.
-- 입력: `user_request`, `user_feedback`, 현재 Knowledge 목록.
-- 모델 호출: `chat_completion()` 경유 후 LLM 응답 JSON 수신.
-- 반영 처리: `handleKnowledgeReflection()`으로 ADD/MODIFY/DELETE/NO_ACTION 연산 적용.
-- 부가 상태: `Agent.experience_iteration_count` 증가 반영.
-
-2) Task Execution Reflection 레이어
-- 코드 경로: `src/agent/reflection/index.js`.
-- 기본 동작: tool 실행 결과의 status 기반 즉시 성공/실패 판정 우선.
-- 조건부 동작: 중간 판정 필요 시 `llmEvaluate` 경유 평가 수행 가능 구조.
-
-### 8.5 모델 호출 방식 정리
-
-- Planning 호출 경로: `src/agent/planning/index.js`에서 `getDefaultModel` 기반 server/local 분기 후 LLM 호출.
-- Thinking 호출 경로: `src/agent/code-act/thinking.js`에서 동일하게 `getDefaultModel` 기반 server/local 분기 후 LLM 호출.
-- Knowledge Reflection 호출 경로: `src/knowledge/feedback.js`에서 `chat_completion` 기반 호출 수행.
-- 로그 저장: LLM 호출 기록은 `LLMLogs` 모델로 적재되는 구조.
-
-### 8.6 Output 생성 시 경험 적용 방식
-
-- 직접 적용 경로는 Prompt Injection 구조.
-- Planning 시 `resolvePlanningKnowledge`가 category 필터링된 Knowledge를 문자열 결합 후 planning Prompt에 삽입.
-- Execution 시 `resolveThinkingKnowledge`가 category 필터링된 Knowledge를 thinking Prompt에 삽입.
-- 실패 피드백은 LocalMemory user 메시지로 재주입되어 다음 action 생성에 즉시 반영.
-- 최종 summary는 task 결과와 생성 파일 메타데이터를 종합하되, 간접적으로는 앞선 knowledge 주입과 memory 누적의 영향이 반영된 결과.
-
-### 8.7 Evolve 수행 레벨 정의
-
-- evolve는 단순 Output 문구 교정 레벨이 아닌 전략/규칙/사용자 프로필 레벨 수행 구조.
-- 장기 evolve: Knowledge DB 갱신을 통한 planning/execution 정책 변화.
-- 단기 evolve: LocalMemory 오류 피드백 누적을 통한 현재 task 실행 품질 보정.
-- 결론적으로 LemonAI의 evolve는 Prompt-Policy 레벨과 Execution-Control 레벨의 결합 진화 구조.
-
-## 9. 경험 저장 이중 계층 구조 상세
-
-장기 경험과 단기 경험의 저장소, 작동 기준, 적용 경로를 명확히 구분하기 위한 상세 설명.
-
-### 9.1 이중 계층 개념 정의
-
-- 장기 계층: Knowledge 테이블 기반 영속 경험 저장 계층.
-- 단기 계층: LocalMemory 기반 task 실행 중 문맥/오류 피드백 저장 계층.
-- 결합 방식: 장기 계층은 다음 실행 전반의 정책/규칙에 영향, 단기 계층은 현재 task 반복 루프의 즉시 보정에 영향.
-
-### 9.2 이중 계층 저장소 및 작동 기준
-
-#### 9.2.1 장기 경험 계층
-
-- 저장소: SQLite DB `Knowledge` 테이블.
-- 입력 소스: 사용자 요청(`user_request`) + 사용자 피드백(`user_feedback`) + 기존 knowledge 집합.
-- 갱신 트리거: `handle_feedback()` 호출 시점.
-- 갱신 방식: LLM이 반환한 operations(ADD/MODIFY/DELETE/NO_ACTION)를 `handleKnowledgeReflection()`으로 반영.
-- 적용 기준: Planning/Thinking 프롬프트 단계에서 category 필터 기반 주입.
-
-#### 9.2.2 단기 경험 계층
-
-- 저장소: LocalMemory(task 단위 메시지 저장소).
-- 입력 소스: thinking 프롬프트, assistant action 결과, reflection 실패 코멘트.
-- 갱신 트리거: Code-Act 루프 각 반복 시점.
-- 갱신 방식: `memory.addMessage(user|assistant, content)` 누적 저장.
-- 적용 기준: 동일 task의 다음 action 생성 직전에 최근 메모리 문맥 재주입.
-
-### 9.3 경험 저장 이중 계층 구조 다이어그램
-
-```mermaid
-flowchart LR
-    U[사용자 요청 및 피드백] --> KR[Knowledge Reflection\nsrc/knowledge/feedback.js]
-    KR --> KP[knowledge.txt Prompt 구성]
-    KP --> KL[LLM 판단\nADD MODIFY DELETE NO_ACTION]
-    KL --> KDB[(SQLite Knowledge Table)]
-
-    KDB --> PK[Planning Knowledge Injection\nuser_profile core_directive planning]
-    KDB --> TK[Thinking Knowledge Injection\nuser_profile core_directive execution]
-
-    T[현재 Task 실행] --> TH[Thinking Prompt 생성]
-    TH --> LA[LLM Action 생성 XML]
-    LA --> EX[Runtime Action 실행]
-    EX --> RF[Reflection 판정]
-    RF -->|failure| LM[LocalMemory 누적\n오류 코멘트 user 재주입]
-    RF -->|success| LS[Task 진행]
-    LM --> TH
-
-    PK --> TH
-    TK --> TH
-```
-
-### 9.4 작동 기준 흐름도 장기 대 단기
-
-```mermaid
-flowchart TD
-    A[새로운 사용자 상호작용 발생] --> B{경험 반영 대상 판단}
-    B -->|사용자 선호 전략 규칙 변화| C[장기 계층 반영]
-    B -->|현재 task 실행 실패 보정| D[단기 계층 반영]
-
-    C --> E[Knowledge Reflection Prompt 실행]
-    E --> F[Knowledge DB 업데이트]
-    F --> G[다음 Planning Thinking에서 정책 주입]
-
-    D --> H[LocalMemory에 실패 코멘트 저장]
-    H --> I[같은 task 재시도 시 메모리 재주입]
-    I --> J[즉시 실행 품질 보정]
-```
-
-### 9.5 요약
-
-- 장기 계층은 에이전트 정책과 사용자 프로필 축적을 담당하는 진화 레이어.
-- 단기 계층은 현재 작업의 오류 교정과 반복 실행 안정화를 담당하는 실행 레이어.
-- Self-Evolving은 두 계층이 결합되어 장기 전략 개선과 단기 실행 보정을 동시에 달성하는 구조.

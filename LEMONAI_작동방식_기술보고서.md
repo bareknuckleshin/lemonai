@@ -521,3 +521,78 @@ Reflection은 두 레이어로 구분되는 구조.
 - 장기 evolve: Knowledge DB 갱신을 통한 planning/execution 정책 변화.
 - 단기 evolve: LocalMemory 오류 피드백 누적을 통한 현재 task 실행 품질 보정.
 - 결론적으로 LemonAI의 evolve는 Prompt-Policy 레벨과 Execution-Control 레벨의 결합 진화 구조.
+
+## 9. 경험 저장 이중 계층 구조 상세
+
+장기 경험과 단기 경험의 저장소, 작동 기준, 적용 경로를 명확히 구분하기 위한 상세 설명.
+
+### 9.1 이중 계층 개념 정의
+
+- 장기 계층: Knowledge 테이블 기반 영속 경험 저장 계층.
+- 단기 계층: LocalMemory 기반 task 실행 중 문맥/오류 피드백 저장 계층.
+- 결합 방식: 장기 계층은 다음 실행 전반의 정책/규칙에 영향, 단기 계층은 현재 task 반복 루프의 즉시 보정에 영향.
+
+### 9.2 이중 계층 저장소 및 작동 기준
+
+#### 9.2.1 장기 경험 계층
+
+- 저장소: SQLite DB `Knowledge` 테이블.
+- 입력 소스: 사용자 요청(`user_request`) + 사용자 피드백(`user_feedback`) + 기존 knowledge 집합.
+- 갱신 트리거: `handle_feedback()` 호출 시점.
+- 갱신 방식: LLM이 반환한 operations(ADD/MODIFY/DELETE/NO_ACTION)를 `handleKnowledgeReflection()`으로 반영.
+- 적용 기준: Planning/Thinking 프롬프트 단계에서 category 필터 기반 주입.
+
+#### 9.2.2 단기 경험 계층
+
+- 저장소: LocalMemory(task 단위 메시지 저장소).
+- 입력 소스: thinking 프롬프트, assistant action 결과, reflection 실패 코멘트.
+- 갱신 트리거: Code-Act 루프 각 반복 시점.
+- 갱신 방식: `memory.addMessage(user|assistant, content)` 누적 저장.
+- 적용 기준: 동일 task의 다음 action 생성 직전에 최근 메모리 문맥 재주입.
+
+### 9.3 경험 저장 이중 계층 구조 다이어그램
+
+```mermaid
+flowchart LR
+    U[사용자 요청 및 피드백] --> KR[Knowledge Reflection\nsrc/knowledge/feedback.js]
+    KR --> KP[knowledge.txt Prompt 구성]
+    KP --> KL[LLM 판단\nADD MODIFY DELETE NO_ACTION]
+    KL --> KDB[(SQLite Knowledge Table)]
+
+    KDB --> PK[Planning Knowledge Injection\nuser_profile core_directive planning]
+    KDB --> TK[Thinking Knowledge Injection\nuser_profile core_directive execution]
+
+    T[현재 Task 실행] --> TH[Thinking Prompt 생성]
+    TH --> LA[LLM Action 생성 XML]
+    LA --> EX[Runtime Action 실행]
+    EX --> RF[Reflection 판정]
+    RF -->|failure| LM[LocalMemory 누적\n오류 코멘트 user 재주입]
+    RF -->|success| LS[Task 진행]
+    LM --> TH
+
+    PK --> TH
+    TK --> TH
+```
+
+### 9.4 작동 기준 흐름도 장기 대 단기
+
+```mermaid
+flowchart TD
+    A[새로운 사용자 상호작용 발생] --> B{경험 반영 대상 판단}
+    B -->|사용자 선호 전략 규칙 변화| C[장기 계층 반영]
+    B -->|현재 task 실행 실패 보정| D[단기 계층 반영]
+
+    C --> E[Knowledge Reflection Prompt 실행]
+    E --> F[Knowledge DB 업데이트]
+    F --> G[다음 Planning Thinking에서 정책 주입]
+
+    D --> H[LocalMemory에 실패 코멘트 저장]
+    H --> I[같은 task 재시도 시 메모리 재주입]
+    I --> J[즉시 실행 품질 보정]
+```
+
+### 9.5 요약
+
+- 장기 계층은 에이전트 정책과 사용자 프로필 축적을 담당하는 진화 레이어.
+- 단기 계층은 현재 작업의 오류 교정과 반복 실행 안정화를 담당하는 실행 레이어.
+- Self-Evolving은 두 계층이 결합되어 장기 전략 개선과 단기 실행 보정을 동시에 달성하는 구조.

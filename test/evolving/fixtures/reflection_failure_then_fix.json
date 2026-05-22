@@ -1,0 +1,16 @@
+{
+  "name": "S2-reflection-failure-recovery",
+  "requirement": "매출 데이터를 표 형태로 요약하고 개선안 3개를 제시",
+  "first_attempt": {
+    "output": "설명이 길고 표가 없음",
+    "status": "failure",
+    "reflection_comments": "출력 형식을 표로 고정하고 개선안을 번호 리스트로 3개 제시하세요."
+  },
+  "retry_attempt": {
+    "expected": {
+      "contains_table": true,
+      "improvement_count": 3,
+      "uses_reflection_comments": true
+    }
+  }
+}

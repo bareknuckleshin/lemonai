@@ -1,0 +1,16 @@
+{
+  "name": "S4-category-separation",
+  "inputs": {
+    "user_request": "나는 핀테크 스타트업 CTO야. 보안 관련 코드 리뷰 체크리스트를 만들어줘",
+    "user_feedback": "앞으로 코드 예시는 TypeScript를 사용하고, 보안 리스크는 우선순위로 표기해줘"
+  },
+  "expected": {
+    "user_profile": [
+      "핀테크 스타트업 CTO"
+    ],
+    "execution": [
+      "TypeScript 우선",
+      "보안 리스크 우선순위 표기"
+    ]
+  }
+}

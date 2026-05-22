@@ -48,9 +48,9 @@
 
 ## 테스트 실행 전략
 
-1. **Unit**: LocalMemory, FileStorage, knowledge.util
-2. **Component/Service**: feedback handler (LLM 응답 mock)
-3. **Light Integration**: conversation 2~3턴 시뮬레이션
+1. **API Integration (권장)**: Docker로 실행한 서비스(`http://localhost:5005`)에 직접 요청
+2. **Scenario Validation**: conversation/query + knowledge + platform 엔드포인트 조합으로 S1~S4 베이스라인 점검
+3. **확장**: 필요시 스트리밍 agent run 엔드포인트를 별도 E2E 잡에서 검증
 
 ## 자동화 우선순위
 
@@ -60,6 +60,6 @@
 
 ## 로컬 관찰 포인트 (WSL)
 
-- 메모리 파일이 `Caches/memory` 하위에 생성/갱신되는지
-- feedback 루틴이 agent run 경로에서 호출되는지
-- knowledge reflection JSON operation이 실제 저장소에 반영되는지
+- Docker 앱 기동 후 `http://localhost:5005` 응답 여부
+- `/api/platform`, `/api/knowledge`, `/api/conversation/query` 응답 스키마
+- (확장) `/api/agent` 계열을 붙여 실제 evolving 흐름의 end-to-end 검증

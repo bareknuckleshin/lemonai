@@ -52,6 +52,45 @@
 2. **Scenario Validation**: conversation/query + knowledge + platform 엔드포인트 조합으로 S1~S4 베이스라인 점검
 3. **확장**: 필요시 스트리밍 agent run 엔드포인트를 별도 E2E 잡에서 검증
 
+## 테스트 실행 방법 (로컬 PC + Docker)
+
+### 1) 서비스 실행 확인
+
+```bash
+curl -sS http://localhost:5005/api/platform
+```
+
+- JSON 응답이 오면 테스트 준비 완료입니다.
+
+### 2) 의존성 설치
+
+```bash
+pnpm install
+```
+
+### 3) Evolving API 테스트만 실행
+
+```bash
+pnpm run test:evolving:api
+```
+
+또는
+
+```bash
+npx mocha ./test/evolving/evolving.api.integration.test.js
+```
+
+### 4) 결과 해석
+
+- `passing`: localhost:5005 서비스와 API 연동 테스트 성공
+- `pending`: 테스트 시작 전 서버 연결 체크 실패(대부분 Docker 미기동/포트 미노출)
+
+### 5) 다른 호스트/포트로 테스트하고 싶을 때
+
+```bash
+LEMON_API_BASE_URL=http://127.0.0.1:5005 pnpm run test:evolving:api
+```
+
 ## 자동화 우선순위
 
 1. S1 + S2

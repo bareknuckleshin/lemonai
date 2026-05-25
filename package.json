@@ -12,7 +12,8 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "make-skip": "electron-forge make --skip-package",
-    "electron-start": "electron-forge start"
+    "electron-start": "electron-forge start",
+    "test:evolving:api": "mocha ./test/evolving/evolving.api.integration.test.js"
   },
   "dependencies": {
     "@dqbd/tiktoken": "^1.0.21",
